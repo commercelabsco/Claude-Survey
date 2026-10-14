@@ -78,24 +78,17 @@ textarea{min-height:6rem;resize:vertical;margin-top:.9rem}
   <p class="intro">We want to learn how you use Claude day to day, what's working, and what would help you get more out of it. There are no right or wrong answers, and you don't need to be technical. If a question doesn't apply to you, just pick the "not applicable" or "not sure" option.</p>
   <p class="msg"><strong>📅 Deadline: Friday, October 23, 2026.</strong> Please submit your answers by then.</p>
   <p class="msg"><strong>This survey is not anonymous.</strong> Your name and email are recorded with your answers so we can follow up and offer support that fits your role.</p>
-  <p class="hint" id="whoami"></p>
   <ul class="facts"><li>⏱ About 5–7 minutes</li><li>15 questions</li><li>Required questions marked *</li></ul>
 
-  <div id="owner" class="owner">
-    <strong>Survey owner view</strong>
-    <div id="ownerCount" class="hint">Loading responses…</div>
-    <button id="exportBtn" type="button">Download responses (CSV)</button>
-  </div>
 
   <div class="progress"><div class="bar"><span id="barFill"></span></div><small id="barText">0 of 15 answered</small></div>
 
-  <div class="q" id="box-email"><p class="qtitle">Your work email *</p><p class="hint">So we can follow up with training or support.</p><input type="text" id="emailInput" inputmode="email" autocomplete="email" placeholder="name@company.com" style="margin-top:.9rem"></div>
+  <div class="q" id="box-email"><p class="qtitle">Your full name *</p><input type="text" id="nameInput" autocomplete="name" placeholder="e.g., Juan Dela Cruz" style="margin-top:.9rem"><p class="qtitle" style="margin-top:1.2rem">Your work email *</p><p class="hint">So we can follow up with training or support.</p><input type="text" id="emailInput" inputmode="email" autocomplete="email" placeholder="name@company.com" style="margin-top:.9rem"></div>
   <form id="form" novalidate onsubmit="return false"></form>
   <div id="doneBox" class="done hidden">
     <div class="big">🙏</div>
     <h2>Thank you!</h2>
     <p class="intro">Your answers were saved. They'll help us plan training and support that's actually useful.</p>
-    <p><button class="submit" type="button" id="editBtn" style="max-width:18rem;margin:1.5rem auto 0">Edit my answers</button></p>
   </div>
 </div>
 
@@ -223,12 +216,14 @@ function fill(saved){
 }
 sync();
 
-let db=null,user=null,uid=null;
+// Paste your Google Apps Script web app URL here:
+const SCRIPT_URL = "https://script.google.com/a/macros/commercelabs.co/s/AKfycbx8Twpkm2vIv0qVRgTSKXmpognriYKIjcJVvymWKKCbhzPo6ka_oTF3MBNu6alE9BqgAQ/exec";
 const msg=t=>{const m=document.getElementById("msg");m.textContent=t;m.classList.remove("hidden")};
 document.getElementById("submitBtn").addEventListener("click",async()=>{
+  const name=document.getElementById("nameInput").value.trim();
   const email=document.getElementById("emailInput").value.trim();
-  const emailBox=document.getElementById("box-email"); emailBox.classList.remove("missing");
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){emailBox.classList.add("missing");emailBox.scrollIntoView({behavior:"smooth",block:"center"});msg("Please enter a valid work email at the top.");return}
+  const box=document.getElementById("box-email"); box.classList.remove("missing");
+  if(!name||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){box.classList.add("missing");box.scrollIntoView({behavior:"smooth",block:"center"});msg("Please enter your name and a valid work email at the top.");return}
   const missing=QS.filter(q=>q.req&&!answered(q));
   form.querySelectorAll(".q").forEach(b=>b.classList.remove("missing"));
   if(missing.length){
@@ -236,54 +231,20 @@ document.getElementById("submitBtn").addEventListener("click",async()=>{
     document.getElementById("box-"+missing[0].id).scrollIntoView({behavior:"smooth",block:"center"});
     msg(`Please answer the highlighted question${missing.length>1?"s":""} (${missing.length} left).`); return;
   }
-  if(!db||!uid){msg("Sorry — saving isn't available right now. Please open this survey from the shared Claude link while signed in.");return}
+  const headers=["Submitted","Name","Email"], values=[new Date().toISOString(),name,email];
+  let n=0; QS.forEach(q=>{n++;
+    const na=q.dep&&isNoBuild();
+    headers.push(`Q${n}. ${q.t}`); values.push(na?"Not applicable":[].concat(ans[q.id]).join("; "));
+    if(q.other){headers.push(`Q${n} – Other (text)`);values.push(na?"":(other[q.id]||""))}
+    if(q.follow){headers.push(`Q${n} – Description`);values.push(follow[q.id]||"")}
+  });
   const btn=document.getElementById("submitBtn"); btn.disabled=true; btn.textContent="Saving…";
-  const rec={}; QS.forEach(q=>rec[q.id]=(q.dep&&isNoBuild())?(q.type==="multi"?["Not applicable"]:"Not applicable"):ans[q.id]);
-  rec.respondentId=uid; rec.email=email; rec._other=other; rec._follow=follow; rec.submittedAt=new Date().toISOString();
   try{
-    await db.doc("responses/"+uid).set(rec);
-    form.classList.add("hidden"); document.getElementById("box-email").classList.add("hidden"); document.querySelector(".progress").classList.add("hidden");
+    await fetch(SCRIPT_URL,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({headers,values})});
+    form.classList.add("hidden"); box.classList.add("hidden"); document.querySelector(".progress").classList.add("hidden");
     document.getElementById("doneBox").classList.remove("hidden"); window.scrollTo({top:0,behavior:"smooth"});
-  }catch(err){
-    msg(err&&err.code==="permission_denied"?"You don't have permission to submit. Ask the survey owner to give you Contributor access.":"Something went wrong saving your answers. Please try again.");
-  }finally{btn.disabled=false;btn.textContent="Submit my answers"}
-});
-document.getElementById("editBtn").addEventListener("click",()=>{
-  form.classList.remove("hidden");document.getElementById("box-email").classList.remove("hidden");document.querySelector(".progress").classList.remove("hidden");
-  document.getElementById("doneBox").classList.add("hidden");document.getElementById("msg").classList.add("hidden");
-});
-
-(async()=>{
-  if(!window.claude||!window.claude.use) return;
-  [db,user]=await Promise.all([claude.use("db"),claude.use("user")]);
-  if(!db||!user) return;
-  try{uid=await user.id()}catch(e){}
-  if(uid){try{const me=await user.me(); if(me&&me.name) document.getElementById("whoami").textContent="Responding as "+me.name;}catch(e){}
-    try{const s=await db.doc("responses/"+uid).get(); const d=s.data&&s.data(); if(d) fill(d);}catch(e){}}
-  if(user.isOwner&&user.isOwner()) setupOwner();
-})();
-
-let rows=[];
-async function setupOwner(){
-  document.getElementById("owner").style.display="block";
-  try{
-    const snap=await db.collection("responses").get();
-    rows=snap.docs.map(d=>d.data()).filter(Boolean);
-    document.getElementById("ownerCount").textContent=`${rows.length} response${rows.length===1?"":"s"} so far.`;
-  }catch(e){document.getElementById("ownerCount").textContent="Couldn't load responses."}
-}
-document.getElementById("exportBtn").addEventListener("click",async()=>{
-  const cell=v=>`"${String(v??"").replace(/"/g,'""')}"`;
-  const head=["Submitted","Name","Email"],cols=[];
-  let n=0; QS.forEach(q=>{n++;head.push(`Q${n}. ${q.t}`);cols.push({q,k:"main"});
-    if(q.other){head.push(`Q${n} – Other (text)`);cols.push({q,k:"other"})}
-    if(q.follow){head.push(`Q${n} – Description`);cols.push({q,k:"follow"})}});
-  const lines=[head.map(cell).join(",")];
-  let ps={}; try{ps=await user.profiles(rows.map(r=>r.respondentId).filter(Boolean))||{}}catch(e){}
-  rows.forEach(r=>lines.push([r.submittedAt,(ps[r.respondentId]||{}).name||"Unknown",r.email||"",...cols.map(c=>c.k==="main"?[].concat(r[c.q.id]??"").join("; "):c.k==="other"?(r._other||{})[c.q.id]:(r._follow||{})[c.q.id])].map(cell).join(",")));
-  const dl=await claude.use("downloads");
-  if(!dl){alert("Download isn't available in this view.");return}
-  try{await dl.save({filename:"claude-survey-responses.csv",data:"\uFEFF"+lines.join("\n")})}catch(e){}
+  }catch(err){ msg("Something went wrong saving your answers. Please check your connection and try again."); }
+  finally{btn.disabled=false;btn.textContent="Submit my answers"}
 });
 </script>
 </body>
